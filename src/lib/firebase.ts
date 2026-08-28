@@ -9,15 +9,16 @@ import {
   User 
 } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
+import appletConfig from '../../firebase-applet-config.json';
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyBnztR8Toq9Miqf-94J4Yg3_Z-ZHA1s7oA",
-  authDomain: "drive-91f88.firebaseapp.com",
-  projectId: "drive-91f88",
-  storageBucket: "drive-91f88.firebasestorage.app",
-  messagingSenderId: "321288829450",
-  appId: "1:321288829450:web:880678246f6e3a191ebdf3",
-  measurementId: "G-DECW930PS1"
+  apiKey: appletConfig.apiKey,
+  authDomain: appletConfig.authDomain,
+  projectId: appletConfig.projectId,
+  storageBucket: appletConfig.storageBucket,
+  messagingSenderId: appletConfig.messagingSenderId,
+  appId: appletConfig.appId,
+  oAuthClientId: appletConfig.oAuthClientId,
 };
 
 // Initialize Firebase safely
@@ -54,20 +55,109 @@ export const initAuth = (
 };
 
 /**
- * Perform Google Sign-In with popup to get access token for Google Drive
+ * Request OAuth token using Google Identity Services (GIS)
+ * Seamless fallback when Firebase Auth popup encounters domain restriction
  */
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const requestGisToken = async (): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    try {
+      const google = (window as any).google;
+      if (!google || !google.accounts || !google.accounts.oauth2) {
+        // Wait or load script if not ready
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.onload = () => {
+          try {
+            const g = (window as any).google;
+            const client = g.accounts.oauth2.initTokenClient({
+              client_id: firebaseConfig.oAuthClientId,
+              scope: 'https://www.googleapis.com/auth/drive.file',
+              callback: (response: any) => {
+                if (response.error) {
+                  reject(new Error(response.error_description || response.error));
+                } else if (response.access_token) {
+                  cachedAccessToken = response.access_token;
+                  resolve(response.access_token);
+                } else {
+                  reject(new Error('ไม่พบ Access Token'));
+                }
+              },
+            });
+            client.requestAccessToken();
+          } catch (e) {
+            reject(e);
+          }
+        };
+        script.onerror = () => reject(new Error('ไม่สามารถโหลด Google Identity Services ได้'));
+        document.head.appendChild(script);
+        return;
+      }
+
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: firebaseConfig.oAuthClientId,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: (response: any) => {
+          if (response.error) {
+            reject(new Error(response.error_description || response.error));
+          } else if (response.access_token) {
+            cachedAccessToken = response.access_token;
+            resolve(response.access_token);
+          } else {
+            reject(new Error('ไม่พบ Access Token'));
+          }
+        },
+      });
+      client.requestAccessToken();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+/**
+ * Perform Google Sign-In with popup or GIS to get access token for Google Drive
+ */
+export const googleSignIn = async (): Promise<{ user: User | null; accessToken: string }> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, googleProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      // Sometimes token is on the result or user, or retrieved via credential
-      throw new Error('ไม่พบ Access Token จาก Google OAuth');
+    
+    // First attempt: Firebase Auth with Google Provider
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        return { user: result.user, accessToken: cachedAccessToken };
+      }
+    } catch (popupErr: any) {
+      console.warn('Firebase Popup error, falling back to GIS Token Client:', popupErr?.code || popupErr?.message);
     }
 
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    // Fallback: Google Identity Services (GIS) Token Client
+    const token = await requestGisToken();
+    cachedAccessToken = token;
+
+    // Fetch user profile info from Google UserInfo API
+    let userInfo: any = null;
+    try {
+      const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (profileRes.ok) {
+        userInfo = await profileRes.json();
+      }
+    } catch {
+      // ignore
+    }
+
+    const mockUserObj: any = auth.currentUser || {
+      uid: userInfo?.sub || 'google_' + Date.now(),
+      displayName: userInfo?.name || 'ผู้ใช้ Google Drive',
+      email: userInfo?.email || '',
+      photoURL: userInfo?.picture || undefined
+    };
+
+    return { user: mockUserObj, accessToken: token };
   } catch (error: any) {
     console.error('Google Sign In error:', error);
     throw error;
@@ -85,6 +175,10 @@ export const setAccessToken = (token: string | null) => {
 };
 
 export const logoutGoogle = async () => {
-  await signOut(auth);
+  try {
+    await signOut(auth);
+  } catch {
+    // ignore
+  }
   cachedAccessToken = null;
 };
