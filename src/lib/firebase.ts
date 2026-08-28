@@ -130,10 +130,10 @@ export const googleSignIn = async (): Promise<{ user: User | null; accessToken: 
         return { user: result.user, accessToken: cachedAccessToken };
       }
     } catch (popupErr: any) {
-      console.warn('Firebase Popup error, falling back to GIS Token Client:', popupErr?.code || popupErr?.message);
+      console.warn('Firebase Popup sign-in fallback triggered:', popupErr?.code || popupErr?.message);
     }
 
-    // Fallback: Google Identity Services (GIS) Token Client
+    // Direct GIS Token Client with clear error feedback
     const token = await requestGisToken();
     cachedAccessToken = token;
 
@@ -160,7 +160,7 @@ export const googleSignIn = async (): Promise<{ user: User | null; accessToken: 
     return { user: mockUserObj, accessToken: token };
   } catch (error: any) {
     console.error('Google Sign In error:', error);
-    throw error;
+    throw new Error(error?.message || 'ไม่สามารถยืนยันตัวตน Google ได้ กรุณาลองใหม่อีกครั้ง');
   } finally {
     isSigningIn = false;
   }
