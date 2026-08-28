@@ -10,7 +10,11 @@ import {
   saveUser, 
   updateUser, 
   getActivityLogs, 
-  logActivity 
+  logActivity,
+  subscribeToAwards,
+  subscribeToSettings,
+  subscribeToLogs,
+  subscribeToUsers
 } from './lib/storage';
 import { INITIAL_USERS } from './data/mockData';
 
@@ -67,12 +71,37 @@ export function App() {
     sortBy: 'newest'
   });
 
-  // Load initial data
+  // Load initial data and subscribe to real-time Firestore updates
   useEffect(() => {
+    // Initial local cache hydration
     setAwards(getAwards());
     setUsers(getUsers());
     setSettings(getSystemSettings());
     setLogs(getActivityLogs());
+
+    // Setup real-time cloud sync listeners
+    const unsubAwards = subscribeToAwards((updatedAwards) => {
+      setAwards(updatedAwards);
+    });
+
+    const unsubSettings = subscribeToSettings((updatedSettings) => {
+      setSettings(updatedSettings);
+    });
+
+    const unsubLogs = subscribeToLogs((updatedLogs) => {
+      setLogs(updatedLogs);
+    });
+
+    const unsubUsers = subscribeToUsers((updatedUsers) => {
+      setUsers(updatedUsers);
+    });
+
+    return () => {
+      unsubAwards();
+      unsubSettings();
+      unsubLogs();
+      unsubUsers();
+    };
   }, []);
 
   // Filtered Awards for Public View
