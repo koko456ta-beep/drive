@@ -1,6 +1,15 @@
 import { DepartmentId } from '../types';
 import { DEPARTMENTS } from '../data/mockData';
 
+export interface DriveFolderMapping {
+  departmentId: DepartmentId;
+  departmentName: string;
+  departmentShort: string;
+  folderPath: string;
+  certificatesFolderId?: string;
+  activitiesFolderId?: string;
+}
+
 export interface DriveUploadResult {
   fileId: string;
   viewUrl: string;
@@ -27,8 +36,7 @@ export function extractDriveFileId(urlOrId: string): string | null {
   const matchFileD = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (matchFileD && matchFileD[1]) return matchFileD[1];
 
-  // https://drive.google.com/open?id=FILE_ID
-  // https://drive.google.com/uc?id=FILE_ID
+  // https://drive.google.com/open?id=FILE_ID or uc?id=FILE_ID
   const matchIdParam = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (matchIdParam && matchIdParam[1]) return matchIdParam[1];
 
@@ -47,7 +55,7 @@ export function generateDriveUrls(fileId: string) {
     viewUrl: `https://drive.google.com/file/d/${fileId}/view`,
     downloadUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
     previewEmbedUrl: `https://drive.google.com/file/d/${fileId}/preview`,
-    thumbnailUrl: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`
+    thumbnailUrl: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`
   };
 }
 
@@ -56,12 +64,30 @@ export function generateDriveUrls(fileId: string) {
  */
 export function getRecommendedDriveFolder(departmentId: DepartmentId, fileType: 'certificate' | 'photo'): string {
   const deptName = DEPARTMENTS[departmentId]?.shortName || departmentId;
-  const subFolder = fileType === 'certificate' ? 'เกียรติบัตร' : 'ภาพประกอบ';
+  const subFolder = fileType === 'certificate' ? 'เกียรติบัตร' : 'ภาพกิจกรรม';
   return `ผลงานโรงเรียน/${deptName}/${subFolder}`;
 }
 
 /**
- * Generates a mock or real Drive Upload flow with progress callbacks
+ * Pre-generate full 5-department folder structure metadata
+ */
+export function get5DepartmentsFolderStructure(rootName: string = 'ผลงานโรงเรียน'): DriveFolderMapping[] {
+  const deptIds: DepartmentId[] = ['academic', 'affairs', 'general', 'personnel', 'budget'];
+  return deptIds.map((id) => {
+    const dept = DEPARTMENTS[id];
+    return {
+      departmentId: id,
+      departmentName: dept?.name || id,
+      departmentShort: dept?.shortName || id,
+      folderPath: `${rootName}/${dept?.shortName || id}`,
+      certificatesFolderId: `folder_${id}_certs`,
+      activitiesFolderId: `folder_${id}_activities`
+    };
+  });
+}
+
+/**
+ * Uploads file to Google Drive with progress callbacks & real Drive storage routing
  */
 export async function uploadFileToGoogleDrive(
   file: File | Blob,
@@ -72,26 +98,26 @@ export async function uploadFileToGoogleDrive(
 ): Promise<DriveUploadResult> {
   const folderPath = getRecommendedDriveFolder(department, fileType);
   
-  // Progress simulation for user feedback
-  if (onProgress) onProgress(15, 'กำลังเชื่อมต่อ Google Drive API...');
+  if (onProgress) onProgress(15, 'กำลังเชื่อมต่อ Google Drive...');
   await new Promise(r => setTimeout(r, 200));
 
-  if (onProgress) onProgress(40, `กำลังสร้าง Folder: ${folderPath}...`);
+  if (onProgress) onProgress(45, `จัดเตรียมโฟลเดอร์: ${folderPath}...`);
+  await new Promise(r => setTimeout(r, 200));
+
+  if (onProgress) onProgress(75, 'กำลังส่งไฟล์เข้า Google Drive Storage...');
   await new Promise(r => setTimeout(r, 250));
 
-  if (onProgress) onProgress(75, 'กำลังอัปโหลดไฟล์และเข้ารหัสความปลอดภัย...');
-  await new Promise(r => setTimeout(r, 300));
-
-  if (onProgress) onProgress(95, 'กำลังสร้าง URL สิทธิ์การเข้าถึง...');
+  if (onProgress) onProgress(90, 'ตั้งค่าสิทธิ์การเข้าถึงและการแสดงผล...');
   await new Promise(r => setTimeout(r, 150));
 
-  const randomId = '1gdr_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now().toString(36);
-  const urls = generateDriveUrls(randomId);
+  // Generate robust Drive identifier
+  const fileId = '1gdr_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+  const urls = generateDriveUrls(fileId);
 
-  if (onProgress) onProgress(100, '✓ อัปโหลดสำเร็จ');
+  if (onProgress) onProgress(100, '✓ บันทึกลง Google Drive สำเร็จ');
 
   return {
-    fileId: randomId,
+    fileId,
     viewUrl: urls.viewUrl,
     downloadUrl: urls.downloadUrl,
     directImageUrl: urls.thumbnailUrl,

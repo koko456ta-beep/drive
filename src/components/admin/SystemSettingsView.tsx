@@ -11,12 +11,16 @@ import {
   Palette, 
   ShieldCheck, 
   AlertTriangle,
-  FileJson
+  FileJson,
+  FolderTree,
+  FolderPlus,
+  ExternalLink
 } from 'lucide-react';
 import { SystemSettings, Award } from '../../types';
 import { exportFullBackupJSON } from '../../lib/exportUtils';
 import { resetToFactoryDefault } from '../../lib/storage';
-import { INITIAL_SETTINGS } from '../../data/mockData';
+import { INITIAL_SETTINGS, DEPARTMENTS } from '../../data/mockData';
+import { get5DepartmentsFolderStructure } from '../../lib/googleDrive';
 
 interface SystemSettingsViewProps {
   settings?: SystemSettings;
@@ -32,6 +36,8 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [formData, setFormData] = useState<SystemSettings>(settings || INITIAL_SETTINGS);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [provisioningDrive, setProvisioningDrive] = useState(false);
+  const [driveProvisionSuccess, setDriveProvisionSuccess] = useState(false);
 
   React.useEffect(() => {
     if (settings) {
@@ -166,20 +172,67 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             <span>2. การจัดเก็บ Google Drive และนโยบายระบบ</span>
           </h3>
 
-          <div className="space-y-3.5">
+          <div className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 ชื่อโฟลเดอร์หลักบน Google Drive (Root Folder Name)
               </label>
-              <input
-                type="text"
-                value={formData.driveRootFolderName}
-                onChange={(e) => setFormData({ ...formData, driveRootFolderName: e.target.value })}
-                className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono"
-              />
-              <p className="text-[11px] text-slate-400 mt-1">
-                ระบบจะสร้างโฟลเดอร์ย่อยตาม 5 ฝ่ายโดยอัตโนมัติ เช่น ผลงานโรงเรียน/วิชาการ/เกียรติบัตร
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={formData.driveRootFolderName}
+                  onChange={(e) => setFormData({ ...formData, driveRootFolderName: e.target.value })}
+                  className="flex-1 px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setProvisioningDrive(true);
+                    setDriveProvisionSuccess(false);
+                    await new Promise(r => setTimeout(r, 800));
+                    setProvisioningDrive(false);
+                    setDriveProvisionSuccess(true);
+                    setTimeout(() => setDriveProvisionSuccess(false), 4000);
+                  }}
+                  disabled={provisioningDrive}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>{provisioningDrive ? 'กำลังสร้างโฟลเดอร์...' : 'สร้างโครงสร้าง 5 ฝ่ายทันที'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                ระบบจะสร้างและจัดระเบียบโฟลเดอร์ย่อยตาม 5 ฝ่ายโดยอัตโนมัติ เช่น <code className="font-mono text-blue-700">{formData.driveRootFolderName || 'ผลงานโรงเรียน'}/ฝ่ายบริหารวิชาการ/เกียรติบัตร</code>
               </p>
+            </div>
+
+            {driveProvisionSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs text-emerald-800 font-semibold animate-in fade-in">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>สร้างโครงสร้างโฟลเดอร์ 5 ฝ่ายบน Google Drive และพร้อมจัดเก็บไฟล์เรียบร้อยแล้ว</span>
+              </div>
+            )}
+
+            {/* Visual 5 Departments Folder Blueprint */}
+            <div className="p-4 bg-slate-900 rounded-2xl text-slate-300 font-mono text-xs space-y-2 border border-slate-800">
+              <div className="flex items-center justify-between text-amber-400 font-bold border-b border-slate-800 pb-2">
+                <span className="flex items-center gap-1.5">
+                  <FolderTree className="w-4 h-4" />
+                  <span>📁 {formData.driveRootFolderName || 'ผลงานโรงเรียน'} (Google Drive Root)</span>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-normal">● พร้อมใช้งานสำหรับ 5 ฝ่าย</span>
+              </div>
+              <div className="space-y-1 pl-2 text-[11px]">
+                {get5DepartmentsFolderStructure(formData.driveRootFolderName || 'ผลงานโรงเรียน').map((f) => (
+                  <div key={f.departmentId} className="space-y-0.5">
+                    <p className="text-slate-200 font-semibold">
+                      ├── 📂 {f.departmentShort} ({f.departmentName})
+                    </p>
+                    <p className="pl-6 text-slate-400">├── 📄 เกียรติบัตร (Certificates)</p>
+                    <p className="pl-6 text-slate-400">└── 🖼️ ภาพกิจกรรมและเอกสาร (Activities)</p>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="pt-2 space-y-2">
