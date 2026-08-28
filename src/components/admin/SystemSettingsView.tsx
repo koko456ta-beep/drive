@@ -20,7 +20,11 @@ import { SystemSettings, Award } from '../../types';
 import { exportFullBackupJSON } from '../../lib/exportUtils';
 import { resetToFactoryDefault } from '../../lib/storage';
 import { INITIAL_SETTINGS, DEPARTMENTS } from '../../data/mockData';
-import { get5DepartmentsFolderStructure } from '../../lib/googleDrive';
+import { 
+  get5DepartmentsFolderStructure, 
+  createReal5DepartmentFoldersOnDrive,
+  ProvisionedDriveStructure
+} from '../../lib/googleDrive';
 
 interface SystemSettingsViewProps {
   settings?: SystemSettings;
@@ -37,11 +41,21 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [provisioningDrive, setProvisioningDrive] = useState(false);
-  const [driveProvisionSuccess, setDriveProvisionSuccess] = useState(false);
+  const [driveProgressText, setDriveProgressText] = useState('');
+  const [driveProvisionResult, setDriveProvisionResult] = useState<ProvisionedDriveStructure | null>(null);
+  const [driveError, setDriveError] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (settings) {
       setFormData(settings);
+    }
+    try {
+      const cached = localStorage.getItem('school_awards_drive_structure');
+      if (cached) {
+        setDriveProvisionResult(JSON.parse(cached));
+      }
+    } catch {
+      // ignore
     }
   }, [settings]);
 
@@ -183,35 +197,93 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                   value={formData.driveRootFolderName}
                   onChange={(e) => setFormData({ ...formData, driveRootFolderName: e.target.value })}
                   className="flex-1 px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono"
+                  placeholder="เช่น ผลงานโรงเรียน"
                 />
                 <button
                   type="button"
                   onClick={async () => {
                     setProvisioningDrive(true);
-                    setDriveProvisionSuccess(false);
-                    await new Promise(r => setTimeout(r, 800));
-                    setProvisioningDrive(false);
-                    setDriveProvisionSuccess(true);
-                    setTimeout(() => setDriveProvisionSuccess(false), 4000);
+                    setDriveError(null);
+                    setDriveProgressText('กำลังเริ่มต้นเชื่อมต่อ Google Drive...');
+                    try {
+                      const rootName = formData.driveRootFolderName.trim() || 'ผลงานโรงเรียน';
+                      const result = await createReal5DepartmentFoldersOnDrive(
+                        rootName,
+                        (step, total, msg) => {
+                          setDriveProgressText(`[${step}/${total}] ${msg}`);
+                        }
+                      );
+                      setDriveProvisionResult(result);
+                      setFormData(prev => ({
+                        ...prev,
+                        driveFolderId: result.rootFolderId,
+                        driveRootFolderName: result.rootFolderName
+                      }));
+                      // Save updated settings with real Google Drive ID
+                      onSaveSettings({
+                        ...formData,
+                        driveFolderId: result.rootFolderId,
+                        driveRootFolderName: result.rootFolderName
+                      });
+                      setDriveProgressText('✓ สร้างโฟลเดอร์ 5 ฝ่ายบน Google Drive เรียบร้อยแล้ว!');
+                    } catch (err: any) {
+                      console.error('Drive creation error:', err);
+                      setDriveError(err?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Drive');
+                    } finally {
+                      setProvisioningDrive(false);
+                    }
                   }}
                   disabled={provisioningDrive}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 shrink-0"
                 >
                   <FolderPlus className="w-4 h-4" />
-                  <span>{provisioningDrive ? 'กำลังสร้างโฟลเดอร์...' : 'สร้างโครงสร้าง 5 ฝ่ายทันที'}</span>
+                  <span>{provisioningDrive ? 'กำลังสร้างโฟลเดอร์...' : 'สร้างโฟลเดอร์บน Google Drive จริง'}</span>
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                ระบบจะสร้างและจัดระเบียบโฟลเดอร์ย่อยตาม 5 ฝ่ายโดยอัตโนมัติ เช่น <code className="font-mono text-blue-700">{formData.driveRootFolderName || 'ผลงานโรงเรียน'}/ฝ่ายบริหารวิชาการ/เกียรติบัตร</code>
-              </p>
-            </div>
 
-            {driveProvisionSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs text-emerald-800 font-semibold animate-in fade-in">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>สร้างโครงสร้างโฟลเดอร์ 5 ฝ่ายบน Google Drive และพร้อมจัดเก็บไฟล์เรียบร้อยแล้ว</span>
-              </div>
-            )}
+              {provisioningDrive && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-center gap-2 text-xs text-blue-800 font-medium animate-pulse">
+                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span>{driveProgressText || 'กำลังดำเนินการสร้างโฟลเดอร์...'}</span>
+                </div>
+              )}
+
+              {driveError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2 text-xs text-rose-800">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">ไม่สามารถสร้างโฟลเดอร์บน Google Drive ได้</p>
+                    <p>{driveError}</p>
+                    <p className="text-[11px] text-rose-600">คำแนะนำ: กดปุ่มอีกครั้งและเลือกบัญชี Google ของท่านในหน้าต่างยืนยันสิทธิ์</p>
+                  </div>
+                </div>
+              )}
+
+              {driveProvisionResult && !provisioningDrive && !driveError && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2 text-xs text-emerald-900 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-bold text-emerald-800">
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>สร้างโฟลเดอร์บน Google Drive ของท่านเรียบร้อยแล้ว</span>
+                    </span>
+                    {driveProvisionResult.rootFolderUrl && (
+                      <a
+                        href={driveProvisionResult.rootFolderUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[11px] font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
+                      >
+                        <span>เปิดโฟลเดอร์บน Google Drive</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-emerald-700">
+                    Folder ID: <code className="font-mono bg-emerald-100/70 px-1 py-0.5 rounded">{driveProvisionResult.rootFolderId}</code>
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Visual 5 Departments Folder Blueprint */}
             <div className="p-4 bg-slate-900 rounded-2xl text-slate-300 font-mono text-xs space-y-2 border border-slate-800">
